@@ -1,0 +1,134 @@
+name: Build & Patch AWS PRO R_Admin APK + Python License Server
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'رابط خادم البايثون الجديد (مثال: https://my-python-server.onrender.com/reseller)'
+        required: true
+        default: 'https://saned-python-license-server.onrender.com/reseller'
+      app_name:
+        description: 'اسم التطبيق (App Name)'
+        required: false
+        default: 'AWS PRO 🕸️R_Admin'
+
+jobs:
+  build-and-patch:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 جلب كود المستودع (Checkout Repository)
+        uses: actions/checkout@v4
+
+      - name: ☕ إعداد بيئة Java 17 (Set up JDK 17)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: 🤖 إعداد أدوات Android SDK (Set up Android SDK & Build-Tools)
+        uses: android-actions/setup-android@v3
+
+      - name: 🐍 إعداد بيئة Python 3.11 (Set up Python)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 🧪 فحص خادم البايثون (Verify Python License Server)
+        run: |
+          if [ -d "license-server-python" ]; then
+            pip install -r license-server-python/requirements.txt
+            python3 -m py_compile license-server-python/app.py
+          fi
+
+      - name: 🔄 تعديل رابط السيرفر داخل الـ APK الأصلي وإعادة توقيعه (Patch & Re-sign Original APK)
+        env:
+          TARGET_URL: ${{ github.event.inputs.target_url || 'https://saned-python-license-server.onrender.com/reseller' }}
+          APP_NAME: ${{ github.event.inputs.app_name || 'AWS PRO 🕸️R_Admin' }}
+        run: |
+          mkdir -p output_release
+          python3 - << 'PY'
+          import os, glob, json, shutil, zipfile, urllib.parse
+
+          target_url = os.environ.get("TARGET_URL", "https://saned-python-license-server.onrender.com/reseller").strip()
+          app_name = os.environ.get("APP_NAME", "AWS PRO 🕸️R_Admin").strip()
+          parsed = urllib.parse.urlparse(target_url)
+          verify_url = f"{parsed.scheme}://{parsed.netloc}/activation/verify" if parsed.scheme and parsed.netloc else ""
+
+          # 1. Patch source app_config.json if present
+          src_cfg = "android-app/app/src/main/assets/app_config.json"
+          if os.path.exists(src_cfg):
+              with open(src_cfg, "r", encoding="utf-8") as f:
+                  cfg = json.load(f)
+              cfg["targetUrl"] = target_url
+              cfg["appName"] = app_name
+              if verify_url:
+                  cfg["activationRemoteVerifyUrl"] = verify_url
+              if parsed.netloc and parsed.netloc not in cfg.get("deepLinkHosts", []):
+                  cfg.setdefault("deepLinkHosts", []).insert(0, parsed.netloc)
+              with open(src_cfg, "w", encoding="utf-8") as f:
+                  json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+          # 2. If original APK exists in repo, patch its assets/app_config.json directly
+          apks = glob.glob("**/*.APK", recursive=True) + glob.glob("**/*.apk", recursive=True)
+          apks = [a for a in apks if "output_release" not in a]
+          if apks:
+              orig_apk = apks[0]
+              print("Found original APK:", orig_apk)
+              work_dir = "/tmp/apk_patch_work"
+              shutil.rmtree(work_dir, ignore_errors=True)
+              with zipfile.ZipFile(orig_apk, "r") as zin:
+                  zin.extractall(work_dir)
+              # Remove old META-INF signatures before re-signing
+              shutil.rmtree(os.path.join(work_dir, "META-INF"), ignore_errors=True)
+              cfg_path = os.path.join(work_dir, "assets", "app_config.json")
+              if os.path.exists(cfg_path):
+                  with open(cfg_path, "r", encoding="utf-8") as f:
+                      cfg = json.load(f)
+                  cfg["targetUrl"] = target_url
+                  cfg["appName"] = app_name
+                  if verify_url:
+                      cfg["activationRemoteVerifyUrl"] = verify_url
+                  if parsed.netloc and parsed.netloc not in cfg.get("deepLinkHosts", []):
+                      cfg.setdefault("deepLinkHosts", []).insert(0, parsed.netloc)
+                  with open(cfg_path, "w", encoding="utf-8") as f:
+                      json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+              unsigned_apk = "/tmp/unsigned.apk"
+              with zipfile.ZipFile(unsigned_apk, "w", zipfile.ZIP_DEFLATED) as zout:
+                  for root, _, files in os.walk(work_dir):
+                      for file in files:
+                          full_p = os.path.join(root, file)
+                          rel_p = os.path.relpath(full_p, work_dir)
+                          # Keep resources.arsc and .so uncompressed for Android 11+ compatibility
+                          compress_type = zipfile.ZIP_STORED if (rel_p == "resources.arsc" or rel_p.endswith(".so")) else zipfile.ZIP_DEFLATED
+                          zout.write(full_p, rel_p, compress_type=compress_type)
+              shutil.copy(unsigned_apk, "output_release/unsigned_patched.apk")
+          PY
+
+      - name: 🔑 توقيع ملف الـ APK المعدل بـ zipalign و apksigner (Align & Sign Patched APK)
+        run: |
+          if [ -f "output_release/unsigned_patched.apk" ]; then
+            keytool -genkey -v -keystore /tmp/release.jks               -alias aws_pro_key -keyalg RSA -keysize 2048 -validity 10000               -storepass android123 -keypass android123               -dname "CN=AWS PRO Admin, OU=IT, O=Saned, L=Samawah, C=IQ"
+
+            BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/* | tail -n 1)
+            "$BUILD_TOOLS/zipalign" -p -f -v 4 output_release/unsigned_patched.apk output_release/aligned.apk
+            "$BUILD_TOOLS/apksigner" sign --ks /tmp/release.jks --ks-pass pass:android123 --key-pass pass:android123               --out output_release/AWS_PRO_R_Admin_Patched_Signed.apk output_release/aligned.apk
+            rm -f output_release/unsigned_patched.apk output_release/aligned.apk
+            echo "✅ Signed APK ready: output_release/AWS_PRO_R_Admin_Patched_Signed.apk"
+          fi
+
+      - name: 📦 تجهيز حزمة خادم البايثون للنشر (Package Python Server)
+        run: |
+          if [ -d "license-server-python" ]; then
+            cd license-server-python
+            zip -r ../output_release/saned-python-license-server.zip .
+          fi
+
+      - name: 📤 رفع المخرجات النهائية (Upload Artifacts)
+        uses: actions/upload-artifact@v4
+        with:
+          name: AWS_PRO_R_Admin_Release
+          path: output_release/
