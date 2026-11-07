@@ -1,22 +1,14 @@
-name: Build & Patch AWS PRO R_Admin APK (Embedded Server + Custom URL)
+name: Build & Patch AWS-PRO-FINAL.apk + Reseller Admin APK
 
 on:
   push:
     branches: [ "main", "master" ]
   workflow_dispatch:
     inputs:
-      target_url:
-        description: 'اكتب EMBEDDED لتشغيل لوحة الموزعين المدمجة داخل التطبيق بدون أخطاء 404، أو ضع رابط سيرفرك الخارجي الفعلي'
+      server_url:
+        description: 'رابط السيرفر الأساسي (مثال: https://saned-license-server.onrender.com)'
         required: true
-        default: 'EMBEDDED'
-      app_name:
-        description: 'اسم التطبيق (App Name)'
-        required: false
-        default: 'AWS PRO 🕸️R_Admin'
-      activation_enabled:
-        description: 'طلب كود تفعيل عند فتح التطبيق؟ (false = يفتح مباشرة بدون كود، true = يطلب كود)'
-        required: false
-        default: 'false'
+        default: 'https://saned-license-server.onrender.com'
 
 jobs:
   build-and-patch:
@@ -37,26 +29,66 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Patch APK (Embed Internal Reseller Server & Configure URL)
+      - name: Patch AWS-PRO-FINAL.apk & Reseller Admin APK
         env:
-          TARGET_URL: ${{ github.event.inputs.target_url || 'EMBEDDED' }}
-          APP_NAME: ${{ github.event.inputs.app_name || 'AWS PRO 🕸️R_Admin' }}
-          ACTIVATION_ENABLED: ${{ github.event.inputs.activation_enabled || 'false' }}
+          SERVER_URL: ${{ github.event.inputs.server_url || 'https://saned-license-server.onrender.com' }}
         run: |
           mkdir -p output_release
           python3 - << 'PY'
-          import os, json, gzip, base64, shutil, zipfile, urllib.parse
+          import os, json, struct, hashlib, zlib, shutil, zipfile, urllib.parse
 
-          EMBEDDED_HTML_GZ_B64 = "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"
-          embedded_html_bytes = gzip.decompress(base64.b64decode(EMBEDDED_HTML_GZ_B64))
+          raw_url = os.environ.get("SERVER_URL", "https://saned-license-server.onrender.com").strip()
+          if not raw_url.startswith("http://") and not raw_url.startswith("https://"):
+              raw_url = "https://" + raw_url
 
-          raw_target = os.environ.get("TARGET_URL", "EMBEDDED").strip()
-          app_name = os.environ.get("APP_NAME", "AWS PRO 🕸️R_Admin").strip()
-          act_enabled = os.environ.get("ACTIVATION_ENABLED", "false").strip().lower() == "true"
+          # Strip /reseller if user pasted /reseller so base URL works for /api/activate & /api/verify
+          parsed = urllib.parse.urlparse(raw_url)
+          base_server_url = f"{parsed.scheme}://{parsed.netloc}"
+          reseller_url = base_server_url + "/reseller"
 
-          use_embedded = (not raw_target) or (raw_target.upper() == "EMBEDDED")
-          if not use_embedded and not raw_target.startswith("http://") and not raw_target.startswith("https://"):
-              raw_target = "https://" + raw_target
+          print("Base Server URL for AWS-PRO-FINAL.apk:", base_server_url)
+          print("Reseller URL for Admin APK:", reseller_url)
+
+          def patch_libandroid_realtime(so_bytes: bytes, server_base_url: str) -> bytes:
+              ba = bytearray(so_bytes)
+              url_bytes = server_base_url.rstrip("/").encode("utf-8") + b"\x00"
+              if len(url_bytes) > 320:
+                  raise ValueError("Server URL too long (max 320 bytes)")
+
+              ret_insn = struct.pack("<I", 0xd65f03c0) # RET
+              mov1_ret = struct.pack("<II", 0x52800020, 0xd65f03c0) # MOV W0, #1; RET
+
+              # Neutralize anti-debug, certificate SHA256 check, DEX SHA256 check, server tamper kill, and watchdog thread
+              ba[0x14e0:0x14e4] = ret_insn  # initRealtimeGuard
+              ba[0x1538:0x153c] = ret_insn  # check_tracer_pid
+              ba[0x15f0:0x15f4] = ret_insn  # check_memory_maps
+              ba[0x16f4:0x16fc] = mov1_ret  # verify_apk_certificate -> return 1
+              ba[0x1c14:0x1c1c] = mov1_ret  # verify_classes_dex_integrity -> return 1
+              ba[0x2050:0x2054] = ret_insn  # check_server_tampering
+              ba[0x2648:0x264c] = ret_insn  # onServerUrlTampered
+              ba[0x2664:0x2668] = ret_insn  # on_realtime_init
+
+              # Write new null-terminated server_base_url at vaddr 0x3060 (file offset 0x2060)
+              ba[0x2060:0x2060 + len(url_bytes)] = url_bytes
+
+              # Patch getSecureServerUrl (vaddr 0x35cc -> file offset 0x25cc) to call (*env)->NewStringUTF(env, 0x3060)
+              stub = struct.pack("<5I", 0xf9400009, 0x90000001, 0x91018021, 0xf9429d29, 0xd61f0120)
+              ba[0x25cc:0x25cc + len(stub)] = stub
+              return bytes(ba)
+
+          def patch_dex_telemetry_url(dex_bytes: bytes) -> bytes:
+              ba = bytearray(dex_bytes)
+              sig = bytes.fromhex("7100851200000c00380024001a019737")
+              pos = ba.find(sig)
+              if pos != -1:
+                  replacement = bytes.fromhex("7100851200000c007110d61200000c001100")
+                  ba[pos:pos + len(replacement)] = replacement
+                  sha1 = hashlib.sha1(ba[32:]).digest()
+                  ba[12:32] = sha1
+                  chk = zlib.adler32(ba[12:]) & 0xffffffff
+                  struct.pack_into("<I", ba, 8, chk)
+                  print("Patched getTelemetryServerUrl in classes.dex.")
+              return bytes(ba)
 
           apks = []
           for root, _, files in os.walk("."):
@@ -67,101 +99,95 @@ jobs:
                       apks.append(os.path.join(root, file))
 
           if not apks:
-              raise FileNotFoundError("No APK file found in repository to patch!")
+              raise FileNotFoundError("No APK files found in repository!")
 
-          orig_apk = apks[0]
-          print("Found original APK:", orig_apk)
+          for orig_apk in apks:
+              with zipfile.ZipFile(orig_apk, "r") as zin:
+                  names = set(zin.namelist())
+                  is_final_client = "lib/arm64-v8a/libandroid_realtime.so" in names
+                  is_reseller_admin = "assets/app_config.json" in names
 
-          unsigned_apk = "output_release/unsigned_patched.apk"
-          if os.path.exists(unsigned_apk):
-              os.remove(unsigned_apk)
+                  if is_final_client:
+                      out_unsigned = "output_release/unsigned_AWS-PRO-FINAL.apk"
+                      print(f"Patching Client APK ({orig_apk}) -> {out_unsigned}")
+                      with zipfile.ZipFile(out_unsigned, "w") as zout:
+                          for item in zin.infolist():
+                              fn = item.filename
+                              if fn.startswith("META-INF/"):
+                                  u = fn.upper()
+                                  if u == "META-INF/MANIFEST.MF" or u.endswith(".SF") or u.endswith(".RSA") or u.endswith(".DSA"):
+                                      continue
+                              raw = zin.read(fn)
+                              if fn == "lib/arm64-v8a/libandroid_realtime.so":
+                                  raw = patch_libandroid_realtime(raw, base_server_url)
+                              elif fn == "classes.dex":
+                                  raw = patch_dex_telemetry_url(raw)
+                              info = zipfile.ZipInfo(filename=item.filename, date_time=item.date_time)
+                              info.compress_type = item.compress_type
+                              info.external_attr = item.external_attr
+                              zout.writestr(info, raw, compress_type=item.compress_type)
 
-          with zipfile.ZipFile(orig_apk, "r") as zin, zipfile.ZipFile(unsigned_apk, "w") as zout:
-              has_html_index = False
-              for item in zin.infolist():
-                  fn = item.filename
-                  if fn.startswith("META-INF/"):
-                      upper_fn = fn.upper()
-                      if upper_fn == "META-INF/MANIFEST.MF" or upper_fn.endswith(".SF") or upper_fn.endswith(".RSA") or upper_fn.endswith(".DSA"):
-                          continue
-                  if fn == "assets/html/index.html":
-                      has_html_index = True
-
-                  raw_bytes = zin.read(fn)
-                  if fn == "assets/app_config.json":
-                      cfg = json.loads(raw_bytes.decode("utf-8"))
-                      cfg["appName"] = app_name
-                      cfg["activationEnabled"] = act_enabled
-
-                      wv = cfg.setdefault("webViewConfig", {})
-                      wv["enableNativeBridge"] = True
-                      wv["enablePrivateNetworkBridge"] = True
-                      wv["privateNetworkScope"] = "CORS_BYPASS"
-
-                      if use_embedded:
-                          cfg["appType"] = "HTML"
-                          cfg["siteAssetBase"] = "html"
-                          cfg["htmlUsesFileScheme"] = False
-                          cfg["targetUrl"] = "http://127.0.0.1/index.html"
-                          html_cfg = cfg.setdefault("htmlConfig", {})
-                          html_cfg["entryFile"] = "index.html"
-                          html_cfg["enableJavaScript"] = True
-                          html_cfg["enableLocalStorage"] = True
-                          html_cfg["loadMode"] = "AUTO"
-                          print("Configured APK in EMBEDDED LocalHttpServer mode (assets/html/index.html) - zero 404 errors!")
-                      else:
-                          cfg["appType"] = "WEB"
-                          cfg["targetUrl"] = raw_target
-                          parsed = urllib.parse.urlparse(raw_target)
-                          if parsed.netloc and parsed.netloc not in cfg.get("deepLinkHosts", []):
-                              cfg.setdefault("deepLinkHosts", []).insert(0, parsed.netloc)
-                          print("Configured APK in external WEB mode ->", raw_target)
-
-                      raw_bytes = json.dumps(cfg, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-
-                  new_info = zipfile.ZipInfo(filename=item.filename, date_time=item.date_time)
-                  new_info.compress_type = item.compress_type
-                  new_info.external_attr = item.external_attr
-                  zout.writestr(new_info, raw_bytes, compress_type=item.compress_type)
-
-              if not has_html_index:
-                  html_info = zipfile.ZipInfo(filename="assets/html/index.html", date_time=(2026, 11, 7, 12, 0, 0))
-                  html_info.compress_type = zipfile.ZIP_DEFLATED
-                  html_info.external_attr = 0o644 << 16
-                  zout.writestr(html_info, embedded_html_bytes, compress_type=zipfile.ZIP_DEFLATED)
-                  print("Embedded assets/html/index.html inside APK.")
+                  elif is_reseller_admin:
+                      out_unsigned = "output_release/unsigned_AWS_PRO_R_Admin.apk"
+                      print(f"Patching Reseller Admin APK ({orig_apk}) -> {out_unsigned}")
+                      with zipfile.ZipFile(out_unsigned, "w") as zout:
+                          for item in zin.infolist():
+                              fn = item.filename
+                              if fn.startswith("META-INF/"):
+                                  u = fn.upper()
+                                  if u == "META-INF/MANIFEST.MF" or u.endswith(".SF") or u.endswith(".RSA") or u.endswith(".DSA"):
+                                      continue
+                              raw = zin.read(fn)
+                              if fn == "assets/app_config.json":
+                                  cfg = json.loads(raw.decode("utf-8"))
+                                  cfg["appType"] = "WEB"
+                                  cfg["targetUrl"] = reseller_url
+                                  cfg["activationEnabled"] = False
+                                  if parsed.netloc and parsed.netloc not in cfg.get("deepLinkHosts", []):
+                                      cfg.setdefault("deepLinkHosts", []).insert(0, parsed.netloc)
+                                  raw = json.dumps(cfg, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                              info = zipfile.ZipInfo(filename=item.filename, date_time=item.date_time)
+                              info.compress_type = item.compress_type
+                              info.external_attr = item.external_attr
+                              zout.writestr(info, raw, compress_type=item.compress_type)
           PY
 
-      - name: Align & Sign Patched APK
+      - name: Align & Sign All Patched APKs
         run: |
-          if [ -f "output_release/unsigned_patched.apk" ]; then
-            keytool -genkeypair -v -keystore /tmp/release.jks \
-              -alias aws_pro_key -keyalg RSA -keysize 2048 -validity 10000 \
-              -storepass android123 -keypass android123 \
-              -dname "CN=AWS PRO Admin, OU=IT, O=Saned, L=Samawah, C=IQ"
+          keytool -genkeypair -v -keystore /tmp/release.jks             -alias aws_pro_key -keyalg RSA -keysize 2048 -validity 10000             -storepass android123 -keypass android123             -dname "CN=AWS PRO, OU=IT, O=Saned, L=Samawah, C=IQ"
 
-            SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-            if [ -d "$SDK_ROOT/build-tools" ]; then
-              BUILD_TOOLS=$(ls -d "$SDK_ROOT/build-tools/"* | sort -V | tail -n 1)
-              ZIPALIGN="$BUILD_TOOLS/zipalign"
-              APKSIGNER="$BUILD_TOOLS/apksigner"
-            else
-              sudo apt-get update && sudo apt-get install -y zipalign apksigner
-              ZIPALIGN="zipalign"
-              APKSIGNER="apksigner"
-            fi
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          if [ -d "$SDK_ROOT/build-tools" ]; then
+            BUILD_TOOLS=$(ls -d "$SDK_ROOT/build-tools/"* | sort -V | tail -n 1)
+            ZIPALIGN="$BUILD_TOOLS/zipalign"
+            APKSIGNER="$BUILD_TOOLS/apksigner"
+          else
+            sudo apt-get update && sudo apt-get install -y zipalign apksigner
+            ZIPALIGN="zipalign"
+            APKSIGNER="apksigner"
+          fi
 
-            "$ZIPALIGN" -f -v 4 output_release/unsigned_patched.apk output_release/aligned.apk
-            "$APKSIGNER" sign --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
-              --ks /tmp/release.jks --ks-pass pass:android123 --key-pass pass:android123 \
-              --out output_release/AWS_PRO_R_Admin_Patched_Signed.apk output_release/aligned.apk
-            "$APKSIGNER" verify --verbose output_release/AWS_PRO_R_Admin_Patched_Signed.apk
-            rm -f output_release/unsigned_patched.apk output_release/aligned.apk
-            echo "✅ Signed APK ready: output_release/AWS_PRO_R_Admin_Patched_Signed.apk"
+          for unsigned_file in output_release/unsigned_*.apk; do
+            [ -e "$unsigned_file" ] || continue
+            base_name=$(basename "$unsigned_file" | sed 's/^unsigned_//')
+            aligned_file="output_release/aligned_${base_name}"
+            signed_file="output_release/Patched_${base_name}"
+            "$ZIPALIGN" -f -v 4 "$unsigned_file" "$aligned_file"
+            "$APKSIGNER" sign --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true               --ks /tmp/release.jks --ks-pass pass:android123 --key-pass pass:android123               --out "$signed_file" "$aligned_file"
+            "$APKSIGNER" verify --verbose "$signed_file"
+            rm -f "$unsigned_file" "$aligned_file" "${signed_file}.idsig"
+            echo "✅ Ready: $signed_file"
+          done
+
+      - name: Package Python Server
+        run: |
+          if [ -d "license-server-python" ]; then
+            cd license-server-python
+            zip -r ../output_release/saned-python-license-server.zip .
           fi
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: AWS_PRO_R_Admin_Release
+          name: AWS_PRO_Patched_Release
           path: output_release/
