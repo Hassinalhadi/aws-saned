@@ -40,7 +40,7 @@ jobs:
             python3 -m py_compile license-server-python/app.py
           fi
 
-      - name: Patch APK Server URL
+      - name: Patch APK Server URL Safely (Preserving META-INF Services & Compression)
         env:
           TARGET_URL: ${{ github.event.inputs.target_url || 'https://saned-python-license-server.onrender.com/reseller' }}
           APP_NAME: ${{ github.event.inputs.app_name || 'AWS PRO 🕸️R_Admin' }}
@@ -64,14 +64,14 @@ jobs:
                   cfg = json.load(f)
               cfg["targetUrl"] = target_url
               cfg["appName"] = app_name
-              if verify_url:
+              if verify_url and cfg.get("activationRemoteEnabled"):
                   cfg["activationRemoteVerifyUrl"] = verify_url
               if parsed.netloc and parsed.netloc not in cfg.get("deepLinkHosts", []):
                   cfg.setdefault("deepLinkHosts", []).insert(0, parsed.netloc)
               with open(src_cfg, "w", encoding="utf-8") as f:
-                  json.dump(cfg, f, ensure_ascii=False, indent=2)
+                  json.dump(cfg, f, ensure_ascii=False, separators=(",", ":"))
 
-          # 2. Find and patch existing APK in repository (root or any subfolder)
+          # 2. Find original APK in repository
           apks = []
           for root, _, files in os.walk("."):
               if "output_release" in root or ".git" in root:
@@ -85,38 +85,39 @@ jobs:
 
           orig_apk = apks[0]
           print("Found original APK:", orig_apk)
-          work_dir = "/tmp/apk_patch_work"
-          shutil.rmtree(work_dir, ignore_errors=True)
-          with zipfile.ZipFile(orig_apk, "r") as zin:
-              zin.extractall(work_dir)
-
-          # Remove old META-INF v1 signature files before re-signing
-          shutil.rmtree(os.path.join(work_dir, "META-INF"), ignore_errors=True)
-
-          cfg_path = os.path.join(work_dir, "assets", "app_config.json")
-          if os.path.exists(cfg_path):
-              with open(cfg_path, "r", encoding="utf-8") as f:
-                  cfg = json.load(f)
-              cfg["targetUrl"] = target_url
-              cfg["appName"] = app_name
-              if verify_url:
-                  cfg["activationRemoteVerifyUrl"] = verify_url
-              if parsed.netloc and parsed.netloc not in cfg.get("deepLinkHosts", []):
-                  cfg.setdefault("deepLinkHosts", []).insert(0, parsed.netloc)
-              with open(cfg_path, "w", encoding="utf-8") as f:
-                  json.dump(cfg, f, ensure_ascii=False, indent=2)
-              print("Updated assets/app_config.json with targetUrl:", target_url)
 
           unsigned_apk = "output_release/unsigned_patched.apk"
-          with zipfile.ZipFile(unsigned_apk, "w", zipfile.ZIP_DEFLATED) as zout:
-              for root, _, files in os.walk(work_dir):
-                  for file in files:
-                      full_p = os.path.join(root, file)
-                      rel_p = os.path.relpath(full_p, work_dir)
-                      # Keep resources.arsc and native .so uncompressed for Android 11+ compatibility
-                      compress_type = zipfile.ZIP_STORED if (rel_p == "resources.arsc" or rel_p.endswith(".so")) else zipfile.ZIP_DEFLATED
-                      zout.write(full_p, rel_p, compress_type=compress_type)
-          print("Created unsigned patched APK:", unsigned_apk)
+          if os.path.exists(unsigned_apk):
+              os.remove(unsigned_apk)
+
+          # Copy entries directly from original APK to preserve exact compress_type and META-INF/services/*
+          with zipfile.ZipFile(orig_apk, "r") as zin, zipfile.ZipFile(unsigned_apk, "w") as zout:
+              for item in zin.infolist():
+                  fn = item.filename
+                  # Strip ONLY old v1 JAR signature files; MUST keep META-INF/services/* and *.kotlin_module!
+                  if fn.startswith("META-INF/"):
+                      upper_fn = fn.upper()
+                      if upper_fn == "META-INF/MANIFEST.MF" or upper_fn.endswith(".SF") or upper_fn.endswith(".RSA") or upper_fn.endswith(".DSA"):
+                          continue
+
+                  raw_bytes = zin.read(fn)
+                  if fn == "assets/app_config.json":
+                      cfg = json.loads(raw_bytes.decode("utf-8"))
+                      cfg["targetUrl"] = target_url
+                      cfg["appName"] = app_name
+                      if verify_url and cfg.get("activationRemoteEnabled"):
+                          cfg["activationRemoteVerifyUrl"] = verify_url
+                      if parsed.netloc and parsed.netloc not in cfg.get("deepLinkHosts", []):
+                          cfg.setdefault("deepLinkHosts", []).insert(0, parsed.netloc)
+                      raw_bytes = json.dumps(cfg, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                      print("Successfully patched assets/app_config.json ->", target_url)
+
+                  new_info = zipfile.ZipInfo(filename=item.filename, date_time=item.date_time)
+                  new_info.compress_type = item.compress_type
+                  new_info.external_attr = item.external_attr
+                  zout.writestr(new_info, raw_bytes, compress_type=item.compress_type)
+
+          print("Created unsigned patched APK preserving all META-INF/services and compression flags.")
           PY
 
       - name: Align & Sign Patched APK
@@ -135,8 +136,8 @@ jobs:
               APKSIGNER="apksigner"
             fi
 
-            "$ZIPALIGN" -p -f -v 4 output_release/unsigned_patched.apk output_release/aligned.apk
-            "$APKSIGNER" sign --ks /tmp/release.jks --ks-pass pass:android123 --key-pass pass:android123               --out output_release/AWS_PRO_R_Admin_Patched_Signed.apk output_release/aligned.apk
+            "$ZIPALIGN" -f -v 4 output_release/unsigned_patched.apk output_release/aligned.apk
+            "$APKSIGNER" sign --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true               --ks /tmp/release.jks --ks-pass pass:android123 --key-pass pass:android123               --out output_release/AWS_PRO_R_Admin_Patched_Signed.apk output_release/aligned.apk
             "$APKSIGNER" verify --verbose output_release/AWS_PRO_R_Admin_Patched_Signed.apk
             rm -f output_release/unsigned_patched.apk output_release/aligned.apk
             echo "✅ Signed APK ready: output_release/AWS_PRO_R_Admin_Patched_Signed.apk"
