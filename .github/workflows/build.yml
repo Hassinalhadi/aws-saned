@@ -66,28 +66,59 @@ jobs:
               ba[0x1c14:0x1c1c] = mov1_ret  # verify_classes_dex_integrity -> return 1
               ba[0x2050:0x2054] = ret_insn  # check_server_tampering
               ba[0x2648:0x264c] = ret_insn  # onServerUrlTampered
-              ba[0x2664:0x2668] = ret_insn  # on_realtime_init
+              ba[0x2664:0x2668] = ret_insn  # on_realtime_init (DT_INIT_ARRAY)
 
               # Write new null-terminated server_base_url at vaddr 0x3060 (file offset 0x2060)
               ba[0x2060:0x2060 + len(url_bytes)] = url_bytes
 
-              # Patch getSecureServerUrl (vaddr 0x35cc -> file offset 0x25cc) to call (*env)->NewStringUTF(env, 0x3060)
-              stub = struct.pack("<5I", 0xf9400009, 0x90000001, 0x91018021, 0xf9429d29, 0xd61f0120)
-              ba[0x25cc:0x25cc + len(stub)] = stub
+              # Patch getSecureServerUrl body at vaddr 0x35fc (file offset 0x25fc)
+              # Keeps original prologue (0x35cc..0x35f8) & epilogue (0x3638..0x3644) intact so .eh_frame unwind info stays valid
+              body_patch = struct.pack(
+                  "<15I",
+                  0x90000001, # adrp x1, 0x3000
+                  0x91018021, # add  x1, x1, #0x60
+                  0xf9400269, # ldr  x9, [x19, #0]
+                  0xaa1303e0, # mov  x0, x19
+                  0xf9429d29, # ldr  x9, [x9, #0x538] (NewStringUTF)
+                  0xd503201f, 0xd503201f, 0xd503201f, 0xd503201f, 0xd503201f,
+                  0xd503201f, 0xd503201f, 0xd503201f, 0xd503201f, # nop x 9
+                  0xd63f0120, # blr  x9
+              )
+              ba[0x25fc:0x25fc + len(body_patch)] = body_patch
               return bytes(ba)
 
-          def patch_dex_telemetry_url(dex_bytes: bytes) -> bytes:
+          def patch_classes_dex(dex_bytes: bytes) -> bytes:
               ba = bytearray(dex_bytes)
-              sig = bytes.fromhex("7100851200000c00380024001a019737")
-              pos = ba.find(sig)
-              if pos != -1:
-                  replacement = bytes.fromhex("7100851200000c007110d61200000c001100")
-                  ba[pos:pos + len(replacement)] = replacement
-                  sha1 = hashlib.sha1(ba[32:]).digest()
-                  ba[12:32] = sha1
-                  chk = zlib.adler32(ba[12:]) & 0xffffffff
-                  struct.pack_into("<I", ba, 8, chk)
+
+              # 1. Neutralize SanedAutoAcceptHelper.verifyNativeLibraryIntegrity (insns at 0x236c44)
+              # Change const-string v1, "79fd596c..." (1a01 4404) to const-string v1, "##" (1a01 5601)
+              # so v1.startsWith("##") is always true and returns immediately via return-void without killing the process
+              verify_sig = bytes.fromhex("1a0056011a0144046e20142401000a00380003000e00")
+              vpos = ba.find(verify_sig)
+              if vpos != -1:
+                  verify_patch = bytes.fromhex("1a0056011a0156016e20142401000a00380003000e00")
+                  ba[vpos:vpos + len(verify_patch)] = verify_patch
+                  print("Patched verifyNativeLibraryIntegrity in classes.dex.")
+              else:
+                  raise RuntimeError("Could not find verifyNativeLibraryIntegrity signature in classes.dex!")
+
+              # 2. Patch SanedAutoAcceptHelper.getTelemetryServerUrl (insns at 0x235204)
+              # Fill remaining 30 code units of try[0] (0008..0025) with nop (0000) flowing into 0026: return-object v0 (1100)
+              # so ART MethodVerifier never encounters uninitialized registers v1/v2 inside the try block
+              tele_sig = bytes.fromhex("7100851200000c00380024001a019737")
+              tpos = ba.find(tele_sig)
+              if tpos != -1:
+                  tele_patch = bytes.fromhex("7100851200000c007110d61200000c00") + (b"\x00\x00" * 30)
+                  ba[tpos:tpos + len(tele_patch)] = tele_patch
                   print("Patched getTelemetryServerUrl in classes.dex.")
+              else:
+                  raise RuntimeError("Could not find getTelemetryServerUrl signature in classes.dex!")
+
+              # 3. Recompute DEX SHA-1 signature and Adler32 checksum
+              sha1 = hashlib.sha1(ba[32:]).digest()
+              ba[12:32] = sha1
+              chk = zlib.adler32(ba[12:]) & 0xffffffff
+              struct.pack_into("<I", ba, 8, chk)
               return bytes(ba)
 
           apks = []
@@ -117,11 +148,14 @@ jobs:
                                   u = fn.upper()
                                   if u == "META-INF/MANIFEST.MF" or u.endswith(".SF") or u.endswith(".RSA") or u.endswith(".DSA"):
                                       continue
+                              # Strip stale baseline profiles that reference unpatched classes.dex CRC/offsets
+                              if fn in ("assets/dexopt/baseline.prof", "assets/dexopt/baseline.profm"):
+                                  continue
                               raw = zin.read(fn)
                               if fn == "lib/arm64-v8a/libandroid_realtime.so":
                                   raw = patch_libandroid_realtime(raw, base_server_url)
                               elif fn == "classes.dex":
-                                  raw = patch_dex_telemetry_url(raw)
+                                  raw = patch_classes_dex(raw)
                               info = zipfile.ZipInfo(filename=item.filename, date_time=item.date_time)
                               info.compress_type = item.compress_type
                               info.external_attr = item.external_attr
@@ -154,7 +188,10 @@ jobs:
 
       - name: Align & Sign All Patched APKs
         run: |
-          keytool -genkeypair -v -keystore /tmp/release.jks             -alias aws_pro_key -keyalg RSA -keysize 2048 -validity 10000             -storepass android123 -keypass android123             -dname "CN=AWS PRO, OU=IT, O=Saned, L=Samawah, C=IQ"
+          keytool -genkeypair -v -keystore /tmp/release.jks \
+            -alias aws_pro_key -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass android123 -keypass android123 \
+            -dname "CN=AWS PRO, OU=IT, O=Saned, L=Samawah, C=IQ"
 
           SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           if [ -d "$SDK_ROOT/build-tools" ]; then
@@ -172,8 +209,10 @@ jobs:
             base_name=$(basename "$unsigned_file" | sed 's/^unsigned_//')
             aligned_file="output_release/aligned_${base_name}"
             signed_file="output_release/Patched_${base_name}"
-            "$ZIPALIGN" -f -v 4 "$unsigned_file" "$aligned_file"
-            "$APKSIGNER" sign --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true               --ks /tmp/release.jks --ks-pass pass:android123 --key-pass pass:android123               --out "$signed_file" "$aligned_file"
+            "$ZIPALIGN" -p -f -v 4 "$unsigned_file" "$aligned_file"
+            "$APKSIGNER" sign --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+              --ks /tmp/release.jks --ks-pass pass:android123 --key-pass pass:android123 \
+              --out "$signed_file" "$aligned_file"
             "$APKSIGNER" verify --verbose "$signed_file"
             rm -f "$unsigned_file" "$aligned_file" "${signed_file}.idsig"
             echo "✅ Ready: $signed_file"
