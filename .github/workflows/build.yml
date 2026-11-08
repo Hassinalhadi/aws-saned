@@ -39,7 +39,6 @@ jobs:
           mkdir -p output_release
           python3 - << 'PY'
           import os, io, json, base64, struct, hashlib, zlib, shutil, zipfile, urllib.parse
-          import numpy as np
           from PIL import Image, ImageDraw
 
           raw_url = os.environ.get("SERVER_URL", "https://hassinalhadi.pythonanywhere.com").strip()
