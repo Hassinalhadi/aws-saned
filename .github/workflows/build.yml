@@ -226,6 +226,15 @@ jobs:
               assert len(msg_concat_patch) == 0x235a6c - 0x235a3e
               ba[0x235a3e:0x235a6c] = msg_concat_patch
 
+              # Replace unused str[0x31aa] at 0xc9a5e with "Driver Assestant" and point VerificationActivity title to it
+              old_tele_str = b"\x29https://saned-license-server.onrender.com\x00"
+              new_title_str = b"\x10Driver Assestant\x00" + (b"\x00" * (len(old_tele_str) - 18))
+              assert len(new_title_str) == len(old_tele_str)
+              assert ba[0xc9a5e:0xc9a5e + len(old_tele_str)] == old_tele_str
+              ba[0xc9a5e:0xc9a5e + len(new_title_str)] = new_title_str
+              ba[0x237b86:0x237b8a] = bytes.fromhex("1a0eaa31")
+              ba[0x238d6a:0x238d6e] = bytes.fromhex("1a06aa31")
+
               # Show 966547425565 on the WhatsApp Support button in VerificationActivity
               ba[0x238098:0x23809c] = bytes.fromhex("1a084504")
               # Point second WhatsApp option to the WhatsApp Channel string [0x0444]
