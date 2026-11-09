@@ -400,7 +400,7 @@ jobs:
               # Replace str[0x081e] at 0x9c65b ("Drawable resource ID must not be 0") with "Driver Assestant"
               # (Preserves strict DEX string_ids alphabetical sort order between 0x081d "DrawResult..." and 0x081f "DropDownMenu"!)
               old_s81e = b"\x22Drawable resource ID must not be 0\x00"
-              new_s81e = b"\x10Driver Assestant\x00" + (b"\x00" * (len(old_s81e) - 18))
+              new_s81e = b"\x16Driver Assestant" + (b"\xe2\x80\x8b" * 6) + b"\x00"
               assert len(new_s81e) == len(old_s81e)
               assert ba[0x9c65b:0x9c65b + len(old_s81e)] == old_s81e
               ba[0x9c65b:0x9c65b + len(new_s81e)] = new_s81e
