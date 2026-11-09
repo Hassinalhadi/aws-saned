@@ -53,7 +53,7 @@ jobs:
               "xBgwMki1dLTta7NpvU5e3pkNX2PX7a+iUylhE77yHRqyVFbu0BhCvrb1r4EKRU/PeqWD+GL1OOXxvqQ8FpKB4J8noRZhtAknU19f"
               "1J4ZbaTouRdYIquuezWdGpEuclgH/lZMzY5MABTc+IgyqGhvB9giFEP2ZCrXLkEutR0vjit6jPvfcPdTvBQxK99G/pRV5gVNH/Zo"
               "KqCYtRwPNfJJIGtteKaas2WGhoRdYC9o9RU4ZXV9H9tf25dq3zTJikn7HH9iLB/HFV5zBTi6l+Kcm6A4mdNUoRRg3WT+HRdUTOhS"
-              "FdF/8ZSkNul+JWN865rlL9r9sk8MWg/4NZonMiJkIFKkme5cRwzAHm6LrvBpYxTCade0TSWgRR6qy1ud55gVKSgukRKmhoOtKA6K"
+              "FdF/8ZSkNul+JWN865rlL9r9sk8MWg/4NZonMiJkIFKkme5cRwzAHm6LrvBpYxTCade0TSWgRR6qy1ud5gVKSgukRKmhoOtKA6K"
               "FCC3X3Xk2dZBnBWMQGmHMGof2E47V/T0YtYLU7buVXQ1kiz7R8a0LgXYN0j24/zbB870cG8pI17t+wQkWY/b/STKcfaq7OQqtxDv"
               "ff71k+hU/eHuNW727dNEBK5uEnv0dPoxTsqU3Ofdd6dDkwcnBrXFhVxCxdBt6TCcInra8NaLbU/cw5nPfeoONz6DaRmaHD4oejMU"
               "C06J7zPLVV/k3qQ6TgsmnCwd2+VziuWHfiVJYyCP5Gl7lLXW66EnoRxc85t26pDopkowXCpwOmaC7ZF+KpsPYKOramltFmaCESfC"
@@ -508,7 +508,7 @@ jobs:
                               zout.writestr(info, raw, compress_type=item.compress_type)
 
                   elif is_reseller_admin:
-                      out_unsigned = "output_release/unsigned_AWS_PRO_R_Admin.apk"
+                      out_unsigned = "output_release/unsigned_PK_Panel_Admin.apk"
                       print(f"Patching Reseller Admin APK ({orig_apk}) -> {out_unsigned}")
                       with zipfile.ZipFile(out_unsigned, "w") as zout:
                           for item in zin.infolist():
@@ -520,12 +520,18 @@ jobs:
                               raw = zin.read(fn)
                               if fn == "assets/app_config.json":
                                   cfg = json.loads(raw.decode("utf-8"))
+                                  cfg["appName"] = "PK Panel"
                                   cfg["appType"] = "WEB"
                                   cfg["targetUrl"] = reseller_url
                                   cfg["activationEnabled"] = False
                                   if parsed.netloc and parsed.netloc not in cfg.get("deepLinkHosts", []):
                                       cfg.setdefault("deepLinkHosts", []).insert(0, parsed.netloc)
                                   raw = json.dumps(cfg, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                              elif fn == "resources.arsc":
+                                  old_admin_lbl = b"\x12\x16AWS PRO \xf0\x9f\x95\xb8\xef\xb8\x8fR_Admin\x00"
+                                  if old_admin_lbl in raw:
+                                      new_admin_lbl = b"\x08\x08PK Panel\x00" + (b"\x00" * 14)
+                                      raw = raw.replace(old_admin_lbl, new_admin_lbl, 1)
                               info = zipfile.ZipInfo(filename=item.filename, date_time=item.date_time)
                               info.compress_type = item.compress_type
                               info.external_attr = item.external_attr
