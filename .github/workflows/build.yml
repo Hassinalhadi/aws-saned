@@ -235,6 +235,13 @@ jobs:
               ba[0x237b86:0x237b8a] = bytes.fromhex("1a0eaa31")
               ba[0x238d6a:0x238d6e] = bytes.fromhex("1a06aa31")
 
+              # Increase license token EditText max length from 16 (0x10) to 64 (0x40) so Riders-Soloution-pk-1 fits completely
+              assert ba[0x238582:0x238586] == bytes.fromhex("13081000")
+              ba[0x238582:0x238586] = bytes.fromhex("13084000")
+              # Allow mixed case in license token EditText and update label/placeholder
+              replace_dex_string_exact(ba, "16-CHARACTER LICENSE TOKEN", "ENTER YOUR LICENSE TOKEN  ")
+              replace_dex_string_exact(ba, "e.g. 7K9X2P4M", "Riders-pk-1  ")
+
               # Show 966547425565 on the WhatsApp Support button in VerificationActivity
               ba[0x238098:0x23809c] = bytes.fromhex("1a084504")
               # Point second WhatsApp option to the WhatsApp Channel string [0x0444]
