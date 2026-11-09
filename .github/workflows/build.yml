@@ -397,21 +397,20 @@ jobs:
               assert len(msg_concat_patch) == 0x235a6c - 0x235a3e
               ba[0x235a3e:0x235a6c] = msg_concat_patch
 
-              # Replace unused str[0x31aa] at 0xc9a5e with "Driver Assestant" and point VerificationActivity title to it
-              old_tele_str = b"\x29https://saned-license-server.onrender.com\x00"
-              new_title_str = b"\x10Driver Assestant\x00" + (b"\x00" * (len(old_tele_str) - 18))
-              assert len(new_title_str) == len(old_tele_str)
-              assert ba[0xc9a5e:0xc9a5e + len(old_tele_str)] == old_tele_str
-              ba[0xc9a5e:0xc9a5e + len(new_title_str)] = new_title_str
-              ba[0x237b86:0x237b8a] = bytes.fromhex("1a0eaa31")
-              ba[0x238d6a:0x238d6e] = bytes.fromhex("1a06aa31")
+              # Replace str[0x081e] at 0x9c65b ("Drawable resource ID must not be 0") with "Driver Assestant"
+              # (Preserves strict DEX string_ids alphabetical sort order between 0x081d "DrawResult..." and 0x081f "DropDownMenu"!)
+              old_s81e = b"\x22Drawable resource ID must not be 0\x00"
+              new_s81e = b"\x10Driver Assestant\x00" + (b"\x00" * (len(old_s81e) - 18))
+              assert len(new_s81e) == len(old_s81e)
+              assert ba[0x9c65b:0x9c65b + len(old_s81e)] == old_s81e
+              ba[0x9c65b:0x9c65b + len(new_s81e)] = new_s81e
+              ba[0x237b86:0x237b8a] = bytes.fromhex("1a0e1e08")
+              ba[0x238d6a:0x238d6e] = bytes.fromhex("1a061e08")
 
               # Increase license token EditText max length from 16 (0x10) to 64 (0x40) so Riders-Soloution-pk-1 fits completely
               assert ba[0x238582:0x238586] == bytes.fromhex("13081000")
               ba[0x238582:0x238586] = bytes.fromhex("13084000")
-              # Allow mixed case in license token EditText and update label/placeholder
-              replace_dex_string_exact(ba, "16-CHARACTER LICENSE TOKEN", "ENTER YOUR LICENSE TOKEN  ")
-              replace_dex_string_exact(ba, "e.g. 7K9X2P4M", "Riders-pk-1  ")
+              replace_dex_string_exact(ba, "e.g. 7K9X2P4M", "e.g. Riders-1")
 
               # Show 966547425565 on the WhatsApp Support button in VerificationActivity
               ba[0x238098:0x23809c] = bytes.fromhex("1a084504")
